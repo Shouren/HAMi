@@ -73,19 +73,19 @@ func NewScheduler() *Scheduler {
 	return s
 }
 
-func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
+func (s *Scheduler) onUpdateNode(_, newObj any) {
 	s.nodeNotify <- struct{}{}
 }
 
-func (s *Scheduler) onDelNode(obj interface{}) {
+func (s *Scheduler) onDelNode(obj any) {
 	s.nodeNotify <- struct{}{}
 }
 
-func (s *Scheduler) onAddNode(obj interface{}) {
+func (s *Scheduler) onAddNode(obj any) {
 	s.nodeNotify <- struct{}{}
 }
 
-func (s *Scheduler) onAddPod(obj interface{}) {
+func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.ErrorS(fmt.Errorf("invalid pod object"), "Failed to process pod addition")
@@ -104,11 +104,11 @@ func (s *Scheduler) onAddPod(obj interface{}) {
 	s.addPod(pod, nodeID, podDev)
 }
 
-func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
+func (s *Scheduler) onUpdatePod(_, newObj any) {
 	s.onAddPod(newObj)
 }
 
-func (s *Scheduler) onDelPod(obj interface{}) {
+func (s *Scheduler) onDelPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
