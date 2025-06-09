@@ -114,14 +114,17 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig) (string, error) {
 	for _, val := range deviceConfigs.Nodeconfig {
 		if os.Getenv(util.NodeNameEnvName) == val.Name {
 			klog.Infof("Reading config from file %s", val.Name)
-			if val.Devicememoryscaling > 0 {
-				sConfig.DeviceMemoryScaling = val.Devicememoryscaling
+			if val.DeviceMemoryScaling > 0 {
+				sConfig.DeviceMemoryScaling = val.DeviceMemoryScaling
 			}
-			if val.Devicecorescaling > 0 {
-				sConfig.DeviceCoreScaling = val.Devicecorescaling
+			if val.DeviceCoreScaling > 0 {
+				sConfig.DeviceCoreScaling = val.DeviceCoreScaling
 			}
-			if val.Devicesplitcount > 0 {
-				sConfig.DeviceSplitCount = val.Devicesplitcount
+			if val.DeviceSplitCount > 0 {
+				sConfig.DeviceSplitCount = val.DeviceSplitCount
+			}
+			if val.LogLevel != "" {
+				sConfig.LogLevel = val.LogLevel
 			}
 			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
 				nvidia.DevicePluginFilterDevice = val.FilterDevice
