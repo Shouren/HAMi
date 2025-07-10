@@ -219,7 +219,7 @@ func getAdditionalXids(input string) []uint64 {
 	}
 
 	var additionalXids []uint64
-	for _, additionalXid := range strings.Split(input, ",") {
+	for additionalXid := range strings.SplitSeq(input, ",") {
 		trimmed := strings.TrimSpace(additionalXid)
 		if trimmed == "" {
 			continue
