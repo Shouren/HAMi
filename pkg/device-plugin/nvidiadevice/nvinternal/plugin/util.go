@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"strconv"
@@ -120,7 +121,7 @@ func GetIndexAndTypeFromUUID(uuid string) (string, int) {
 
 func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 	migmode := false
-	for _, val := range strings.Split(output, "\n") {
+	for val := range strings.SplitSeq(output, "\n") {
 		if !strings.Contains(val, "MIG") && strings.Contains(val, uuid) {
 			migmode = true
 			continue
@@ -235,7 +236,7 @@ func GetDeviceNames() ([]string, error) {
 		klog.Error(`nvml get count error ret=`, ret)
 		return names, fmt.Errorf("nvml get count error ret: %s", nvml.ErrorString(ret))
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		dev, ret := nvml.DeviceGetHandleByIndex(i)
 		if ret != nvml.SUCCESS {
 			klog.Error(`nvml get device error ret=`, ret)
@@ -405,9 +406,7 @@ func deepCopyMigConfig(src nvidia.MigConfigSpec) nvidia.MigConfigSpec {
 	}
 	if src.MigDevices != nil {
 		dst.MigDevices = make(map[string]int32)
-		for k, v := range src.MigDevices {
-			dst.MigDevices[k] = v
-		}
+		maps.Copy(dst.MigDevices, src.MigDevices)
 	}
 	return dst
 }

@@ -162,7 +162,7 @@ func (ds Devices) GetPluginDevices(count uint) []*kubeletdevicepluginv1beta1.Dev
 
 	if !strings.Contains(ds.GetIDs()[0], "MIG") {
 		for _, dev := range ds {
-			for i := uint(0); i < count; i++ {
+			for i := range count {
 				id := fmt.Sprintf("%v-%v", dev.ID, i)
 				res = append(res, &kubeletdevicepluginv1beta1.Device{
 					ID:       id,

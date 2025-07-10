@@ -136,7 +136,7 @@ type DeviceInfo struct {
 	Health          bool            `json:"health,omitempty"`
 	DeviceVendor    string          `json:"devicevendor,omitempty"`
 	CustomInfo      map[string]any  `json:"custominfo,omitempty"`
-	DevicePairScore DevicePairScore `json:"devicepairscore,omitempty"`
+	DevicePairScore DevicePairScore `json:"devicepairscore"`
 }
 
 type DevicePairScores []DevicePairScore

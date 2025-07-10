@@ -20,6 +20,7 @@ import (
 	"flag"
 	"strconv"
 	"testing"
+	"maps"
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -140,9 +141,7 @@ func TestPatchAnnotations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			annoInputCopy := make(map[string]string)
-			for k, v := range tt.annoInput {
-				annoInputCopy[k] = v
-			}
+			maps.Copy(annoInputCopy, tt.annoInput)
 
 			dev := &EnflameDevices{}
 			got := dev.PatchAnnotations(&corev1.Pod{}, &annoInputCopy, tt.podDevices)

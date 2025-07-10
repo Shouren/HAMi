@@ -269,7 +269,7 @@ func Test_processMigConfigs(t *testing.T) {
 				if len(result) != 3 {
 					t.Errorf("Expected 3 configs, got %d", len(result))
 				}
-				for i := 0; i < 2; i++ {
+				for i := range 2 {
 					if len(result[i].Devices) != 1 || result[i].Devices[0] != int32(i) {
 						t.Errorf("Config for device %d is incorrect: %v", i, result[i])
 					}
@@ -313,7 +313,7 @@ func Test_processMigConfigs(t *testing.T) {
 				if len(result) != 3 {
 					t.Errorf("Expected 3 configs, got %d", len(result))
 				}
-				for i := 0; i < 2; i++ {
+				for i := range 2 {
 					if len(result[i].Devices) != 1 || result[i].Devices[0] != int32(i) {
 						t.Errorf("Config for device %d is incorrect: %v", i, result[i])
 					}

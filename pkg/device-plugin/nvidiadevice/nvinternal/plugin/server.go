@@ -293,7 +293,7 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		} else {
 			plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
 			configSlice := nvidia.MigConfigSpecSlice{}
-			for i := 0; i < deviceNumbers; i++ {
+			for i := range deviceNumbers {
 				conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
 				configSlice = append(configSlice, conf)
 			}
@@ -754,7 +754,7 @@ func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia
 		var result nvidia.MigConfigSpecSlice
 
 		if len(migConfigs["current"]) == 1 && len(migConfigs["current"][0].Devices) == 0 {
-			for i := 0; i < deviceCount; i++ {
+			for i := range deviceCount {
 				config := deepCopyMigConfig(migConfigs["current"][0])
 				config.Devices = []int32{int32(i)}
 				result = append(result, config)
@@ -769,7 +769,7 @@ func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia
 			}
 		}
 
-		for i := 0; i < deviceCount; i++ {
+		for i := range deviceCount {
 			deviceIndex := int32(i)
 			config, exists := deviceToConfig[deviceIndex]
 			if !exists {

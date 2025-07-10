@@ -46,7 +46,7 @@ type LinkDevices []*LinkDevice
 func (devs LinkDevices) Score() int {
 	score := 0
 
-	for i := 0; i < len(devs); i++ {
+	for i := range len(devs) {
 		for j := i + 1; j < len(devs); j++ {
 			score += devs[i].score(devs[j])
 		}
