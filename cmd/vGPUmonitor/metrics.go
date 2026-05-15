@@ -55,6 +55,7 @@ type ClusterManager struct {
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
 	LegacyMetrics   bool
+	draMode         bool
 }
 
 // ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
@@ -298,10 +299,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		// Decide whether to continue or return based on business requirements
 	}
 
-	// Collect Pod and Container Mig information
-	if err := cc.collectPodAndContainerMigInfo(ch); err != nil {
-		klog.Errorf("Failed to collect Pod and Container Mig info: %v", err)
-		// Decide whether to continue or return based on business requirements
+	// Collect Pod and Container Mig information (disabled in DRA mode)
+	if !cc.ClusterManager.draMode {
+		if err := cc.collectPodAndContainerMigInfo(ch); err != nil {
+			klog.Errorf("Failed to collect Pod and Container Mig info: %v", err)
+			// Decide whether to continue or return based on business requirements
+		}
 	}
 
 	klog.Info("Finished collecting metrics for vGPUMonitor")
@@ -434,7 +437,14 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
 
-	pods, err := cc.ClusterManager.PodLister.List(labels.SelectorFromSet(labels.Set{util.AssignedNodeAnnotations: nodeName}))
+	var labelSelector labels.Selector
+	if cc.ClusterManager.draMode {
+		labelSelector = labels.Everything()
+	} else {
+		labelSelector = labels.SelectorFromSet(labels.Set{util.AssignedNodeAnnotations: nodeName})
+	}
+
+	pods, err := cc.ClusterManager.PodLister.List(labelSelector)
 	if err != nil {
 		klog.Errorf("Failed to list pods for node %s: %v", nodeName, err)
 		return fmt.Errorf("failed to list pods: %w", err)
@@ -633,7 +643,7 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 // ClusterManager. Finally, it registers the ClusterManagerCollector with a
 // wrapping Registerer that adds the zone as a label. In this way, the metrics
 // collected by different ClusterManagerCollectors do not collide.
-func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
+func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool, draMode bool) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()
 	}
@@ -641,6 +651,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 		Zone:            zone,
 		containerLister: containerLister,
 		LegacyMetrics:   legacyMetrics,
+		draMode:         draMode,
 	}
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)

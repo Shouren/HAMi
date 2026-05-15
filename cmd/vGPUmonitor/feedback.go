@@ -183,7 +183,7 @@ func Observe(lister *nvidia.ContainerLister) {
 	}
 }
 
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool, draMode bool) error {
 	klog.Info("Starting watchAndFeedback")
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))

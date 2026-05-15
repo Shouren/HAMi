@@ -33,5 +33,11 @@ func ValidateEnvVars() error {
 			return fmt.Errorf("required environment variable %s not set", envVar)
 		}
 	}
+	// In DRA mode, NODE_NAME is also required because the informer relies on it.
+	if os.Getenv("DRA_MODE") == "true" {
+		if os.Getenv("NODE_NAME") == "" {
+			return fmt.Errorf("required environment variable NODE_NAME not set in DRA mode")
+		}
+	}
 	return nil
 }

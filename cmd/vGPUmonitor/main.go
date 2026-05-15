@@ -51,6 +51,7 @@ var (
 	}
 	metricsBindAddress string
 	legacyMetrics      bool
+	draMode            bool
 )
 
 func init() {
@@ -59,12 +60,18 @@ func init() {
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 	rootCmd.Flags().StringVar(&metricsBindAddress, "metrics-bind-address", ":9394", "The TCP address that the vGPUmonitor should bind to for serving prometheus metrics(e.g. 127.0.0.1:9394, :9394)")
 	rootCmd.Flags().BoolVar(&legacyMetrics, "legacy-metrics", false, "Emit legacy metric names alongside new ones for backward compatibility")
+	rootCmd.Flags().BoolVar(&draMode, "dra-mode", false, "Enable DRA-compatible behaviour (disables MIG metrics and stale-cache self-cleanup)")
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
 func start() error {
 	if err := ValidateEnvVars(); err != nil {
 		return fmt.Errorf("failed to validate environment variables: %v", err)
+	}
+
+	// DRA_MODE can be set via --dra-mode flag or DRA_MODE env var (env takes precedence).
+	if os.Getenv("DRA_MODE") == "true" {
+		draMode = true
 	}
 
 	containerLister, err := nvidia.NewContainerLister()
@@ -77,16 +84,20 @@ func start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
-	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
-	err = plugin.CreateMigApplyLockDir()
-	if err != nil {
-		return fmt.Errorf("failed to create MIG apply lock directory: %v", err)
-	}
+	var lockChannel <-chan bool
 
-	lockChannel, err := plugin.WatchLockFile()
-	if err != nil {
-		return fmt.Errorf("failed to watch lock file: %v", err)
+	if !draMode {
+		// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
+		// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
+		err = plugin.CreateMigApplyLockDir()
+		if err != nil {
+			return fmt.Errorf("failed to create MIG apply lock directory: %v", err)
+		}
+
+		lockChannel, err = plugin.WatchLockFile()
+		if err != nil {
+			return fmt.Errorf("failed to watch lock file: %v", err)
+		}
 	}
 
 	var wg sync.WaitGroup
@@ -94,7 +105,7 @@ func start() error {
 
 	// Start the metrics service
 	wg.Go(func() {
-		if err := initMetrics(ctx, containerLister); err != nil {
+		if err := initMetrics(ctx, containerLister, draMode); err != nil {
 			errCh <- err
 		}
 	})
@@ -102,7 +113,7 @@ func start() error {
 	// Start the monitoring and feedback service
 	wg.Go(func() {
 		for {
-			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
+			if err := watchAndFeedback(ctx, containerLister, lockChannel, draMode); err != nil {
 				// if err is temporary closed, wait for lock file to be removed
 				if errors.Is(err, errTemporaryClosed) {
 					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
@@ -136,7 +147,7 @@ func start() error {
 	return nil
 }
 
-func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) error {
+func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister, draMode bool) error {
 	klog.V(4).Info("Initializing metrics for vGPUmonitor")
 	reg := prometheus.NewRegistry()
 	//reg := prometheus.NewPedanticRegistry()
@@ -145,7 +156,7 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.
-	NewClusterManager("vGPU", reg, containerLister, legacyMetrics)
+	NewClusterManager("vGPU", reg, containerLister, legacyMetrics, draMode)
 	//NewClusterManager("ca", reg)
 
 	// Uncomment to add the standard process and Go metrics to the custom registry.

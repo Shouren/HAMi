@@ -86,6 +86,7 @@ type ContainerLister struct {
 	mutex         sync.Mutex
 	clientset     *kubernetes.Clientset
 	nodeName      string
+	draMode       bool
 
 	// Fields for the informer-based pod cache mechanism
 	informerFactory informers.SharedInformerFactory
@@ -113,6 +114,8 @@ func NewContainerLister() (*ContainerLister, error) {
 	if !ok {
 		return nil, fmt.Errorf("HOOK_PATH not set")
 	}
+
+	draMode := os.Getenv("DRA_MODE") == "true"
 	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
 	if err != nil {
 		klog.Errorf("Failed to build kubeconfig: %v", err)
@@ -135,6 +138,7 @@ func NewContainerLister() (*ContainerLister, error) {
 		clientset:     clientset,
 		nodeName:      nodeName,
 		stopCh:        make(chan struct{}),
+		draMode:       draMode,
 	}
 
 	// Initialize the informer
@@ -171,14 +175,17 @@ func (l *ContainerLister) Update() error {
 		return err
 	}
 
-	pods, err := l.podLister.List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("failed to list pods: %v", err)
-	}
+	var podUIDs map[string]bool
+	if !l.draMode {
+		pods, err := l.podLister.List(labels.Everything())
+		if err != nil {
+			return fmt.Errorf("failed to list pods: %v", err)
+		}
 
-	podUIDs := make(map[string]bool, len(pods))
-	for _, pod := range pods {
-		podUIDs[string(pod.UID)] = true
+		podUIDs = make(map[string]bool, len(pods))
+		for _, pod := range pods {
+			podUIDs[string(pod.UID)] = true
+		}
 	}
 
 	for _, entry := range entries {
@@ -187,7 +194,7 @@ func (l *ContainerLister) Update() error {
 		}
 		dirName := filepath.Join(l.containerPath, entry.Name())
 		podUID := strings.Split(entry.Name(), "_")[0]
-		if !podUIDs[podUID] {
+		if !l.draMode && !podUIDs[podUID] {
 			dirInfo, err := os.Stat(dirName)
 			if err == nil && dirInfo.ModTime().Add(resyncInterval).After(time.Now()) {
 				continue
