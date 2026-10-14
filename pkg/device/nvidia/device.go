@@ -410,6 +410,9 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 
 func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	/*gpu related */
+	if err := dev.validateMemoryResourceExclusivity(ctr); err != nil {
+		return false, err
+	}
 	if err := dev.validateMemoryPercentage(ctr); err != nil {
 		return false, err
 	}
@@ -485,6 +488,17 @@ func hasEnvVarWithValue(env []corev1.EnvVar, name, value string) bool {
 		return e.ValueFrom == nil && e.Value == value
 	}
 	return false
+}
+
+func (dev *NvidiaGPUDevices) validateMemoryResourceExclusivity(ctr *corev1.Container) error {
+	// Presence, including an explicit zero, counts as declaring a resource.
+	// Check both lists so cross-declarations cannot bypass validation.
+	absolute := resourcePresent(ctr, corev1.ResourceName(dev.config.ResourceMemoryName))
+	percentage := resourcePresent(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName))
+	if absolute && percentage {
+		return fmt.Errorf("container %s cannot specify both %s and %s", ctr.Name, dev.config.ResourceMemoryName, dev.config.ResourceMemoryPercentageName)
+	}
+	return nil
 }
 
 func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {

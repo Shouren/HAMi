@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"strings"
@@ -1779,5 +1780,82 @@ func TestUnrelatedAnnotationsStillAdmitted(t *testing.T) {
 	}))
 	if !resp.Allowed {
 		t.Fatalf("a pod with unrelated annotations was denied: %v", resp.Result)
+	}
+}
+
+func TestWebhookRejectsConflictingNvidiaMemoryResourcesPerContainer(t *testing.T) {
+	if err := config.InitDevicesWithConfig(&config.Config{NvidiaConfig: nvidia.NvidiaConfig{
+		ResourceCountName: "nvidia.com/gpu", ResourceMemoryName: "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage", DefaultGPUNum: 1, MemoryFactor: 1,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatal(err)
+	}
+	memoryContainer := func(name string, absolute, percentage bool) corev1.Container {
+		ctr := corev1.Container{Name: name, Resources: corev1.ResourceRequirements{
+			Limits:   corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+			Requests: corev1.ResourceList{},
+		}}
+		if absolute {
+			ctr.Resources.Limits["nvidia.com/gpumem"] = resource.MustParse("1024")
+		}
+		if percentage {
+			ctr.Resources.Requests["nvidia.com/gpumem-percentage"] = resource.MustParse("50")
+		}
+		return ctr
+	}
+	tests := []struct {
+		name                       string
+		containers, initContainers []corev1.Container
+		conflict                   string
+	}{
+		{
+			name: "absolute and percentage memory limits are rejected",
+			containers: []corev1.Container{{
+				Name: "app",
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"nvidia.com/gpu":               resource.MustParse("1"),
+					"nvidia.com/gpumem":            resource.MustParse("1024"),
+					"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+				}},
+			}},
+			conflict: "app",
+		},
+		{name: "app conflict", containers: []corev1.Container{memoryContainer("app", true, true)}, conflict: "app"},
+		{name: "init conflict", containers: []corev1.Container{{Name: "app"}}, initContainers: []corev1.Container{memoryContainer("init", true, true)}, conflict: "init"},
+		{name: "different app containers", containers: []corev1.Container{memoryContainer("absolute", true, false), memoryContainer("percentage", false, true)}},
+		{name: "different init and app containers", containers: []corev1.Container{memoryContainer("absolute", true, false)}, initContainers: []corev1.Container{memoryContainer("percentage", false, true)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: tc.containers, InitContainers: tc.initContainers}}
+			raw, err := json.Marshal(pod)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp := wh.Handle(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+				Operation: admissionv1.Create, Object: runtime.RawExtension{Raw: raw},
+			}})
+			if tc.conflict == "" {
+				if !resp.Allowed {
+					t.Fatalf("separate memory forms rejected: %+v", resp.Result)
+				}
+				return
+			}
+			if resp.Allowed {
+				t.Fatal("conflicting resources admitted")
+			}
+			if resp.Result == nil {
+				t.Fatal("missing rejection message")
+			}
+			for _, text := range []string{tc.conflict, "nvidia.com/gpumem", "nvidia.com/gpumem-percentage"} {
+				if !strings.Contains(resp.Result.Message, text) {
+					t.Errorf("message %q does not contain %q", resp.Result.Message, text)
+				}
+			}
+		})
 	}
 }

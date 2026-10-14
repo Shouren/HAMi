@@ -19,6 +19,7 @@ package nvidia
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -3918,4 +3919,66 @@ func TestMemoryPercentage_InvalidRequestBehindValidLimit(t *testing.T) {
 	req, err := dev.GenerateResourceRequests(ctr)
 	assert.Assert(t, err != nil)
 	assert.DeepEqual(t, req, device.ContainerDeviceRequest{})
+}
+
+func TestMutateAdmissionValidatesMemoryResourceCombinations(t *testing.T) {
+	for _, prefix := range []string{"nvidia.com/", "custom.example/"} {
+		memory := corev1.ResourceName(prefix + "gpumem")
+		percentage := corev1.ResourceName(prefix + "gpumem-percentage")
+		dev := &NvidiaGPUDevices{config: NvidiaConfig{
+			ResourceCountName: prefix + "gpu", ResourceMemoryName: string(memory),
+			ResourceMemoryPercentageName: string(percentage), DefaultGPUNum: 1,
+		}}
+		for _, memoryInRequests := range []bool{false, true} {
+			for _, percentageInRequests := range []bool{false, true} {
+				for _, values := range [][2]string{{"1024", "50"}, {"0", "50"}, {"1024", "0"}, {"0", "0"}} {
+					t.Run(fmt.Sprintf("%s/requests=%t,%t/values=%s,%s", prefix, memoryInRequests, percentageInRequests, values[0], values[1]), func(t *testing.T) {
+						ctr := &corev1.Container{Name: "gpu-app", Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{}, Requests: corev1.ResourceList{},
+						}}
+						memoryList, percentageList := ctr.Resources.Limits, ctr.Resources.Limits
+						if memoryInRequests {
+							memoryList = ctr.Resources.Requests
+						}
+						if percentageInRequests {
+							percentageList = ctr.Resources.Requests
+						}
+						memoryList[memory] = resource.MustParse(values[0])
+						percentageList[percentage] = resource.MustParse(values[1])
+						found, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+						if err == nil || found {
+							t.Fatalf("conflicting resources admitted: found=%t, err=%v", found, err)
+						}
+						for _, text := range []string{ctr.Name, string(memory), string(percentage)} {
+							if !strings.Contains(err.Error(), text) {
+								t.Errorf("error %q does not contain %q", err, text)
+							}
+						}
+						if _, ok := ctr.Resources.Limits[corev1.ResourceName(prefix+"gpu")]; ok {
+							t.Fatal("rejected container was mutated")
+						}
+					})
+				}
+			}
+		}
+		for _, name := range []corev1.ResourceName{memory, percentage} {
+			for _, inRequests := range []bool{false, true} {
+				for _, value := range []string{"0", "50"} {
+					t.Run(fmt.Sprintf("%s/requests=%t/value=%s", name, inRequests, value), func(t *testing.T) {
+						ctr := &corev1.Container{Name: "gpu-app", Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{}, Requests: corev1.ResourceList{},
+						}}
+						list := ctr.Resources.Limits
+						if inRequests {
+							list = ctr.Resources.Requests
+						}
+						list[name] = resource.MustParse(value)
+						if _, err := dev.MutateAdmission(ctr, &corev1.Pod{}); err != nil {
+							t.Fatalf("single memory resource rejected: %v", err)
+						}
+					})
+				}
+			}
+		}
+	}
 }
