@@ -323,32 +323,63 @@ func BenchmarkScoreNodeOccupied(b *testing.B) {
 
 // newBenchmarkScheduler builds a Scheduler whose node cache holds nodeCount
 // nodes of gpusPerNode devices each, and whose pod cache holds podCount pods
-// spread across them, each holding one device.
-func newBenchmarkScheduler(nodeCount, gpusPerNode, podCount int) *Scheduler {
+// spread across them, each holding one device. MIG fixtures reserve distinct
+// 1g.5gb placements on each GPU, including GPUs outside the candidate node.
+func newBenchmarkScheduler(nodeCount, gpusPerNode, podCount int, mig bool) *Scheduler {
 	nodeManager := newNodeManager()
 	nodeNames := make([]string, 0, nodeCount)
 	for i := range nodeCount {
 		nodeName := fmt.Sprintf("node-%d", i)
 		nodeNames = append(nodeNames, nodeName)
-		nodeManager.addNode(nodeName, testNodeInfo(nodeName, gpusPerNode))
+		node := testNodeInfo(nodeName, gpusPerNode)
+		if mig {
+			for j := range node.Devices[nvidia.NvidiaGPUDevice] {
+				gpu := &node.Devices[nvidia.NvidiaGPUDevice][j]
+				gpu.Mode = nvidia.MigMode
+				gpu.Count = 7
+				gpu.Devmem = 40960
+				gpu.MIGProfiles = []device.MigProfile{{Name: "1g.5gb", MemoryMB: 4864, Core: 14}}
+				for start := range uint32(7) {
+					gpu.MIGProfiles[0].Placements = append(gpu.MIGProfiles[0].Placements, device.MigPlacement{Start: start, Size: 1})
+				}
+			}
+		}
+		nodeManager.addNode(nodeName, node)
 	}
 
 	podManager := device.NewPodManager()
 	for i := range podCount {
 		nodeName := nodeNames[i%nodeCount]
+		gpuIndex := i % gpusPerNode
+		memory, cores := int64(benchMemreq), int64(benchCoresreq)
+		var annotations map[string]string
+		if mig {
+			// Spread each node's pods across its GPUs before reusing a GPU.
+			gpuIndex = (i / nodeCount) % gpusPerNode
+			placement := (i / nodeCount) / gpusPerNode
+			if placement >= 7 {
+				panic("MIG benchmark fixture exceeds GPU placement capacity")
+			}
+			memory, cores = 4864, 14
+			annotations = map[string]string{
+				nvidia.MigAllocationsAnnotation: fmt.Sprintf(`[{"containerIndex":0,"deviceIndex":0,"gpuUUID":%q,"profile":"1g.5gb","placement":{"start":%d,"size":1}}]`, fmt.Sprintf("%s-gpu-%d", nodeName, gpuIndex), placement),
+			}
+		}
 		podManager.AddPod(&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("pod-%d", i),
-				Namespace: "default",
-				UID:       k8stypes.UID(fmt.Sprintf("uid-%d", i)),
+				Name:        fmt.Sprintf("pod-%d", i),
+				Namespace:   "default",
+				UID:         k8stypes.UID(fmt.Sprintf("uid-%d", i)),
+				Annotations: annotations,
 			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
 		}, nodeName, device.PodDevices{
 			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 				device.ContainerDevices{{
-					UUID:      fmt.Sprintf("%s-gpu-%d", nodeName, i%gpusPerNode),
+					UUID:      fmt.Sprintf("%s-gpu-%d", nodeName, gpuIndex),
 					Type:      nvidia.NvidiaGPUDevice,
-					Usedmem:   benchMemreq,
-					Usedcores: benchCoresreq,
+					Usedmem:   memory,
+					Usedcores: cores,
 				}},
 			},
 		})
@@ -367,16 +398,23 @@ func BenchmarkGetNodesUsage(b *testing.B) {
 		nodes       int
 		gpusPerNode int
 		pods        int
+		mig         bool
 	}{
 		{nodes: 50, gpusPerNode: 8, pods: 1000},
 		{nodes: 100, gpusPerNode: 16, pods: 5000},
+		{nodes: 50, gpusPerNode: 8, pods: 1000, mig: true},
+		{nodes: 100, gpusPerNode: 16, pods: 5000, mig: true},
 	}
 
 	quietKlog(b)
 
 	for _, size := range sizes {
-		b.Run(fmt.Sprintf("nodes=%d/gpus=%d/pods=%d", size.nodes, size.gpusPerNode, size.pods), func(b *testing.B) {
-			scheduler := newBenchmarkScheduler(size.nodes, size.gpusPerNode, size.pods)
+		name := fmt.Sprintf("nodes=%d/gpus=%d/pods=%d", size.nodes, size.gpusPerNode, size.pods)
+		if size.mig {
+			name += "/mig"
+		}
+		b.Run(name, func(b *testing.B) {
+			scheduler := newBenchmarkScheduler(size.nodes, size.gpusPerNode, size.pods, size.mig)
 			task := newBenchmarkPod(0)
 			candidates := []string{"node-0"}
 			b.ReportAllocs()
